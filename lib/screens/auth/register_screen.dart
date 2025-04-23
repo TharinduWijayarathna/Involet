@@ -89,14 +89,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   Center(
                     child: Column(
                       children: [
-                        SizedBox(
-                          height: 120,
-                          child: Lottie.network(
-                            'https://assets9.lottiefiles.com/packages/lf20_k9wsvdgv.json',
-                            repeat: true,
-                            animate: true,
-                          ),
-                        ),
                         const SizedBox(height: 16),
                         Text(
                           'Create Account',

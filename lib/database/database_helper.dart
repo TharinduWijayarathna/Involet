@@ -5,6 +5,9 @@ import '../models/customer.dart';
 import '../models/product.dart';
 import '../models/invoice.dart';
 import '../models/invoice_item.dart';
+import '../models/user.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -23,12 +26,24 @@ class DatabaseHelper {
     String path = join(await getDatabasesPath(), 'involet_database.db');
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onCreate(Database db, int version) async {
+    // Users table
+    await db.execute('''
+      CREATE TABLE users(
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        password TEXT NOT NULL,
+        photoUrl TEXT
+      )
+    ''');
+    
     // Business table
     await db.execute('''
       CREATE TABLE business(
@@ -103,6 +118,99 @@ class DatabaseHelper {
         FOREIGN KEY (productId) REFERENCES products (id)
       )
     ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Add users table if upgrading from version 1
+      await db.execute('''
+        CREATE TABLE users(
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL UNIQUE,
+          password TEXT NOT NULL,
+          photoUrl TEXT
+        )
+      ''');
+    }
+  }
+
+  // Hash password
+  String _hashPassword(String password) {
+    var bytes = utf8.encode(password);
+    var digest = sha256.convert(bytes);
+    return digest.toString();
+  }
+
+  // User authentication methods
+  Future<int> insertUser(User user, String password) async {
+    final db = await database;
+    Map<String, dynamic> userMap = user.toMap();
+    userMap['password'] = _hashPassword(password);
+    
+    try {
+      return await db.insert('users', userMap);
+    } catch (e) {
+      return -1;
+    }
+  }
+
+  Future<User?> authenticateUser(String email, String password) async {
+    final db = await database;
+    final hashedPassword = _hashPassword(password);
+    
+    final List<Map<String, dynamic>> maps = await db.query(
+      'users',
+      where: 'email = ? AND password = ?',
+      whereArgs: [email, hashedPassword],
+    );
+    
+    if (maps.isEmpty) return null;
+    return User.fromMap(maps.first);
+  }
+
+  Future<User?> getUserByEmail(String email) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'users',
+      where: 'email = ?',
+      whereArgs: [email],
+    );
+    
+    if (maps.isEmpty) return null;
+    return User.fromMap(maps.first);
+  }
+
+  Future<User?> getUserById(String id) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    
+    if (maps.isEmpty) return null;
+    return User.fromMap(maps.first);
+  }
+
+  Future<int> updateUser(User user) async {
+    final db = await database;
+    return await db.update(
+      'users',
+      user.toMap(),
+      where: 'id = ?',
+      whereArgs: [user.id],
+    );
+  }
+
+  Future<int> updateUserPassword(String id, String newPassword) async {
+    final db = await database;
+    return await db.update(
+      'users',
+      {'password': _hashPassword(newPassword)},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   // Business methods

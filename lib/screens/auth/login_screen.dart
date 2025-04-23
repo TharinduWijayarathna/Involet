@@ -71,14 +71,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   Center(
                     child: Column(
                       children: [
-                        SizedBox(
-                          height: 160,
-                          child: Lottie.network(
-                            'https://assets9.lottiefiles.com/packages/lf20_urbgokve.json',
-                            repeat: true,
-                            animate: true,
-                          ),
-                        ),
                         const SizedBox(height: 16),
                         Text(
                           'Involet',

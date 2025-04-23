@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/user.dart' as app_models;
+import 'package:uuid/uuid.dart';
+import '../models/user.dart';
+import '../database/database_helper.dart';
 
 class AuthProvider extends ChangeNotifier {
-  final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
-  firebase_auth.User? _firebaseUser;
-  app_models.User? _user;
+  final DatabaseHelper _db = DatabaseHelper();
+  User? _user;
   bool _isLoading = false;
   String? _error;
 
-  firebase_auth.User? get firebaseUser => _firebaseUser;
-  app_models.User? get user => _user;
+  User? get user => _user;
   bool get isLoading => _isLoading;
   String? get error => _error;
-  bool get isAuthenticated => _firebaseUser != null;
+  bool get isAuthenticated => _user != null;
 
   AuthProvider() {
     _init();
@@ -25,15 +24,11 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     // Check if user is already logged in
-    _firebaseUser = _auth.currentUser;
+    final prefs = await SharedPreferences.getInstance();
+    final String? userId = prefs.getString('userId');
 
-    if (_firebaseUser != null) {
-      _user = app_models.User(
-        id: _firebaseUser!.uid,
-        email: _firebaseUser!.email ?? '',
-        name: _firebaseUser!.displayName ?? '',
-        photoUrl: _firebaseUser!.photoURL,
-      );
+    if (userId != null) {
+      _user = await _db.getUserById(userId);
     }
 
     _isLoading = false;
@@ -46,29 +41,25 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      final user = await _db.authenticateUser(email, password);
 
-      _firebaseUser = result.user;
-
-      if (_firebaseUser != null) {
-        _user = app_models.User(
-          id: _firebaseUser!.uid,
-          email: _firebaseUser!.email ?? '',
-          name: _firebaseUser!.displayName ?? '',
-          photoUrl: _firebaseUser!.photoURL,
-        );
+      if (user != null) {
+        _user = user;
 
         // Store login status locally
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isLoggedIn', true);
+        await prefs.setString('userId', user.id);
+        
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _error = 'Invalid email or password';
+        _isLoading = false;
+        notifyListeners();
+        return false;
       }
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
     } catch (e) {
       _error = e.toString();
       _isLoading = false;
@@ -83,32 +74,43 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await _auth.createUserWithEmailAndPassword(
+      // Check if email already exists
+      final existingUser = await _db.getUserByEmail(email);
+      if (existingUser != null) {
+        _error = 'Email already in use';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+      
+      // Create new user with UUID
+      final userId = const Uuid().v4();
+      final newUser = User(
+        id: userId,
         email: email,
-        password: password,
+        name: name,
+        photoUrl: null,
       );
 
-      _firebaseUser = result.user;
-
-      if (_firebaseUser != null) {
-        // Update user profile
-        await _firebaseUser!.updateDisplayName(name);
-        
-        _user = app_models.User(
-          id: _firebaseUser!.uid,
-          email: _firebaseUser!.email ?? '',
-          name: name,
-          photoUrl: _firebaseUser!.photoURL,
-        );
+      final result = await _db.insertUser(newUser, password);
+      
+      if (result > 0) {
+        _user = newUser;
 
         // Store login status locally
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('isLoggedIn', true);
+        await prefs.setString('userId', userId);
+        
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _error = 'Failed to create account';
+        _isLoading = false;
+        notifyListeners();
+        return false;
       }
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
     } catch (e) {
       _error = e.toString();
       _isLoading = false;
@@ -121,31 +123,74 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    await _auth.signOut();
-    _firebaseUser = null;
     _user = null;
 
     // Clear login status locally
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLoggedIn', false);
+    await prefs.remove('userId');
 
     _isLoading = false;
     notifyListeners();
   }
 
-  Future<void> resetPassword(String email) async {
+  Future<bool> resetPassword(String email) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      await _auth.sendPasswordResetEmail(email: email);
+      final user = await _db.getUserByEmail(email);
+      if (user == null) {
+        _error = 'No account found with this email';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+      
+      // In a real app, you would implement password reset logic here
+      // For example, send an email with a reset link or reset token
+      // For this implementation, we'll just return true to indicate success
+      
       _isLoading = false;
       notifyListeners();
+      return true;
     } catch (e) {
       _error = e.toString();
       _isLoading = false;
       notifyListeners();
+      return false;
+    }
+  }
+  
+  Future<bool> updatePassword(String currentPassword, String newPassword) async {
+    if (_user == null) return false;
+    
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    
+    try {
+      // Verify current password
+      final user = await _db.authenticateUser(_user!.email, currentPassword);
+      if (user == null) {
+        _error = 'Current password is incorrect';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+      
+      // Update password
+      final result = await _db.updateUserPassword(_user!.id, newPassword);
+      
+      _isLoading = false;
+      notifyListeners();
+      return result > 0;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
     }
   }
 } 

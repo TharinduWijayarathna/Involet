@@ -52,10 +52,9 @@ dependencies:
   shared_preferences: ^2.2.3
   lottie: ^3.1.0
   
-  # Authentication - updated versions
-  firebase_core: ^3.13.0
-  firebase_auth: ^5.5.2
-  cloud_firestore: ^5.6.6
+  # Authentication
+  uuid: ^4.3.3
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:
